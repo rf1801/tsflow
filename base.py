@@ -1,49 +1,26 @@
-import numpy as np
-import os
-import pandas as pd
-from keras import models, layers
 from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
-from keras.preprocessing.image import ImageDataGenerator
-from keras.layers import Layer, InputSpec
-from keras.layers import concatenate, Dense, Conv2D, MaxPooling2D, Flatten, Input, Activation, Dropout, BatchNormalization
-from keras import Model
+from tensorflow.keras import layers, models
+from keras.layers import concatenate, Dense, Conv2D, MaxPooling2D, Flatten, Activation, BatchNormalization, Dropout
+from keras import *
 from keras.applications import MobileNet
-from keras import backend as K
-
-# Define the directories for training and validation data
-train_dir = "C:/Users/raouf/Desktop/pfe/dataset/train"
-validation_dir = "C:/Users/raouf/Desktop/pfe/dataset/val"
-
-# Load dataset
-image_dir = "C:/Users/raouf/Desktop/pfe/dataset"
-#multiclass_df = pd.read_csv("/kaggle/input/balanced-datasets/Adasyn_dataset/labels.csv")
-
-# Define binary and malignant dataframes
-"""
-benign_df = multiclass_df.loc[(multiclass_df['label'] == 'DF') | (multiclass_df['label'] == 'BKL') | (multiclass_df['label'] == 'NV')]
-benign_df.loc[:, 'label'] = "0"
-malignant_df = multiclass_df.loc[(multiclass_df['label'] == 'BCC') | (multiclass_df['label'] == 'MEL') | (multiclass_df['label'] == 'AKIEC') | (multiclass_df['label'] == 'VASC')]
-malignant_df.loc[:, 'label'] = "1"
-binary_df = pd.concat([benign_df, malignant_df])
-"""
-
-num_epochs = 50
-mode = "binary"
-
-if mode == "binary":
-    #df = binary_df
-    loss_function = "binary_crossentropy"
-    num_classes = 2
-else:
-    #df = malignant_df
-    loss_function = "categorical_crossentropy"
-    num_classes = 4
-
+from keras.applications import VGG16
+from keras.applications.resnet import ResNet50
 from keras import backend as K
 from keras.layers import Layer
 import keras.layers as kl
+import tensorflow as tf
+import pandas as pd
+from tensorflow.keras.applications import EfficientNetB0
+import keras.applications
 
-# Soft Attention Layer Definition
+image_dir = "C:/Users/raouf/Desktop/pfe/dataset"
+num_epochs = 4
+mode = "binary"
+loss_function = "binary_crossentropy"
+num_classes = 2
+
+
+
 class SoftAttention(Layer):
     def __init__(self, ch, m, concat_with_x=False, aggregate=False, **kwargs):
         self.channels = int(ch)
@@ -51,7 +28,6 @@ class SoftAttention(Layer):
         self.aggregate_channels = aggregate
         self.concat_input_with_scaled = concat_with_x
         super(SoftAttention, self).__init__(**kwargs)
-
 
     def build(self, input_shape):
 
@@ -124,7 +100,6 @@ class SoftAttention(Layer):
 
         return [o, softmax_alpha]
 
-
     def compute_output_shape(self, input_shape):
         return [self.out_features_shape, self.out_attention_maps_shape]
 
@@ -133,26 +108,57 @@ class SoftAttention(Layer):
 
 
 
-# Model Configuration
 
-# Your code for data directories, imports, and Soft Attention layer definition
 
-# Model Configuration
-def build_model():
-    # Define the base model
-    mobile_net = MobileNet(include_top=False, weights="imagenet", input_shape=(224, 224, 3))
-    mobile_net.trainable = False
-    conv = mobile_net.layers[-6].output
 
-    attention_layer, map2 = SoftAttention(aggregate=True, m=16, concat_with_x=False, ch=int(conv.shape[-1]), name='soft_attention')(conv)
+def choose_conv_base(name="from_scratch", input_shape=(224, 224, 3)):
+    if (name == "from_scratch"):
+        conv_base = models.Sequential()
+        conv_base.add(layers.Conv2D(32, (3, 3), activation='relu', input_shape=input_shape))
+        conv_base.add(layers.MaxPooling2D((2, 2)))
+        conv_base.add(layers.Conv2D(64, (3, 3), activation='relu'))
+        conv_base.add(layers.MaxPooling2D((2, 2)))
+        conv_base.add(layers.Conv2D(128, (3, 3), activation='relu'))
+        conv_base.add(layers.MaxPooling2D((2, 2)))
+        conv_base.add(layers.Conv2D(128, (3, 3), activation='relu'))
+        conv_base.add(layers.MaxPooling2D((2, 2)))
+    elif (name == "mobilenet"):
+        conv_base = MobileNet(weights='imagenet', include_top=False, input_shape=input_shape)
+        conv_base.trainable = False
+    elif (name == "vgg16"):
+        conv_base = VGG16(weights='imagenet', include_top=False, input_shape=input_shape)
+        conv_base.trainable = False
+    elif (name == "resnet"):
+        conv_base = ResNet50(weights='imagenet', include_top=False, input_shape=input_shape)
+        conv_base.trainable = False
+    elif (name == "efficientnet"):
+        conv_base = EfficientNetB0(weights='imagenet', include_top=False, input_shape=input_shape)
+        conv_base.trainable = False
+    return conv_base
+
+
+
+
+
+def build_model(arch):
+    from_scratch = choose_conv_base(arch)
+    conv = from_scratch.layers[-1].output
+
+    #attention
+    attention_layer, map2 = SoftAttention(aggregate=True, m=16, concat_with_x=False, ch=int(conv.shape[-1]),name='soft_attention')(conv)
     attention_layer = (MaxPooling2D(pool_size=(2, 2), padding="same")(attention_layer))
+
+
+
     conv = (MaxPooling2D(pool_size=(2, 2), padding="same")(conv))
 
-    param=[conv, attention_layer]
-    conv = concatenate(param)
-    #conv = Activation("relu")(conv)
-    conv = Dense(1, activation='sigmoid')(conv)
 
+    #attention
+    param=[conv, attention_layer]
+
+
+    conv = concatenate(param)
+    conv = Activation("relu")(conv)
     conv = Dropout(0.2)(conv)
     conv = (Conv2D(filters=512, kernel_size=(3, 3), activation="relu", padding="same", kernel_initializer='he_normal')(conv))
     conv = (BatchNormalization()(conv))
@@ -161,47 +167,56 @@ def build_model():
     conv = (MaxPooling2D(pool_size=(4, 4), padding="same")(conv))
     conv = (Flatten()(conv))
     conv = (Dense(1024, activation="relu")(conv))
-    conv = (Dense(num_classes, activation="softmax")(conv))
-
-    model = Model(inputs=mobile_net.inputs, outputs=conv)
-    model.compile(optimizer="adam", loss=loss_function, metrics=["accuracy"])
+    conv = (Dense(2, activation="softmax")(conv))
+    model = Model(inputs=from_scratch.inputs, outputs=conv)
+    # model.summary()
+    model.compile(optimizer=tf.keras.optimizers.Adam(lr=0.0001), loss=loss_function, metrics=["accuracy"])
     return model
 
-# Define callbacks
+
+# adding some callbacks : early stopping, modelCheckpoint, and reduce learning rate on plateau
 es = EarlyStopping(monitor="val_accuracy", verbose=1, min_delta=0.01, patience=10)
 mc = ModelCheckpoint(monitor="val_accuracy", verbose=1, filepath="./bestmodel.h5", save_best_only=True)
-reducelr = ReduceLROnPlateau(monitor="val_accuracy", verbose=1, patience=5, factor=0.5, min_lr=1e-7)
+reducelr = ReduceLROnPlateau(monitor="val_accuracy", verbose=1, patience=2, factor=0.1, min_lr=1e-7)
+
+# put callbacks to use in the cb array
 cb = [mc]
 batch_size = 32
 
-# Data augmentation and normalization
-train_datagen = ImageDataGenerator(rescale=1./255, rotation_range=40, width_shift_range=0.2, height_shift_range=0.2, shear_range=0.2, zoom_range=0.2, horizontal_flip=True)
-test_datagen = ImageDataGenerator(rescale=1./255)
+train_dir = "C:/Users/raouf/Desktop/pfe/dataset/train"
+validation_dir = "C:/Users/raouf/Desktop/pfe/dataset/val"
 
-# Flow training images in batches using train_datagen generator
-train_generator = train_datagen.flow_from_directory(
-    train_dir,
-    target_size=(224, 224),
-    batch_size=batch_size,
-    class_mode='binary'
+# Set up data generators
+train_datagen = tf.keras.preprocessing.image.ImageDataGenerator(rescale=1./255 #, rotation_range=40,width_shift_range=0.2,height_shift_range=0.2,shear_range=0.2,zoom_range=0.2,horizontal_flip=True
 )
+train_generator = train_datagen.flow_from_directory(train_dir,target_size=(224, 224),batch_size=batch_size,class_mode='categorical')
+test_datagen = tf.keras.preprocessing.image.ImageDataGenerator(rescale=1./255)
+validation_generator = test_datagen.flow_from_directory(validation_dir,target_size=(224, 224),batch_size=batch_size,class_mode='categorical')
 
-# Flow validation images in batches using test_datagen generator
-validation_generator = test_datagen.flow_from_directory(
-    validation_dir,
-    target_size=(224, 224),
-    batch_size=batch_size,
-    class_mode='binary'
-)
 
-# Build and train the model
-model = build_model()
 
-history = model.fit_generator(
-    train_generator,
-    steps_per_epoch=train_generator.samples // batch_size,
-    epochs=num_epochs,
-    validation_data=validation_generator,
-    validation_steps=validation_generator.samples // batch_size,
-    callbacks=cb
-)
+
+
+import time
+
+architecture="efficientnet"
+
+
+start_time = time.time()
+
+
+# Compile and train the model
+model = build_model(architecture)
+history = model.fit_generator(train_generator, steps_per_epoch=train_generator.samples // batch_size,
+                              epochs=num_epochs, validation_data=validation_generator,
+                              validation_steps=validation_generator.samples // batch_size, callbacks=cb)
+history_df = pd.DataFrame(history.history)
+end_time = time.time()
+duration = round(end_time - start_time)
+print("Execution time:", duration, "seconds")
+
+
+# Save the DataFrame to an Excel file
+history_excel_path = 'C:/Users/raouf/Desktop/pfe/history/to compare effnet soft/' +architecture+ '_history_'+ str(duration)+  '.xlsx'
+history_df.to_excel(history_excel_path, index=False)
+print("Training history saved to:", history_excel_path)
