@@ -14,11 +14,19 @@ from tensorflow.keras.applications import EfficientNetB0
 import keras.applications
 
 image_dir = "C:/Users/raouf/Desktop/pfe/dataset"
-num_epochs = 4
+train_dir = "C:/Users/raouf/Desktop/pfe/dataset/train"
+validation_dir = "C:/Users/raouf/Desktop/pfe/dataset/val"
+saveHistoryDirectory='C:/Users/raouf/Desktop/pfe/history/resnet/'
+
+#comment this if you are professor
+from myDirectory import *
+
+
+num_epochs = 10
 mode = "binary"
 loss_function = "binary_crossentropy"
 num_classes = 2
-
+batch_size = 96
 
 
 class SoftAttention(Layer):
@@ -145,8 +153,8 @@ def build_model(arch):
     conv = from_scratch.layers[-1].output
 
     #attention
-    attention_layer, map2 = SoftAttention(aggregate=True, m=16, concat_with_x=False, ch=int(conv.shape[-1]),name='soft_attention')(conv)
-    attention_layer = (MaxPooling2D(pool_size=(2, 2), padding="same")(attention_layer))
+    #attention_layer, map2 = SoftAttention(aggregate=True, m=16, concat_with_x=False, ch=int(conv.shape[-1]),name='soft_attention')(conv)
+    #attention_layer = (MaxPooling2D(pool_size=(2, 2), padding="same")(attention_layer))
 
 
 
@@ -154,8 +162,8 @@ def build_model(arch):
 
 
     #attention
-    param=[conv, attention_layer]
-
+    #param=[conv, attention_layer]
+    param = [conv]
 
     conv = concatenate(param)
     conv = Activation("relu")(conv)
@@ -170,28 +178,32 @@ def build_model(arch):
     conv = (Dense(2, activation="softmax")(conv))
     model = Model(inputs=from_scratch.inputs, outputs=conv)
     # model.summary()
-    model.compile(optimizer=tf.keras.optimizers.Adam(lr=0.0001), loss=loss_function, metrics=["accuracy"])
+    model.compile(optimizer=tf.keras.optimizers.Adam(lr=0.005), loss=loss_function, metrics=["accuracy"])
     return model
 
 
 # adding some callbacks : early stopping, modelCheckpoint, and reduce learning rate on plateau
-es = EarlyStopping(monitor="val_accuracy", verbose=1, min_delta=0.01, patience=10)
+es = EarlyStopping(monitor="val_accuracy", verbose=1, min_delta=0.01, patience=6)
 mc = ModelCheckpoint(monitor="val_accuracy", verbose=1, filepath="./bestmodel.h5", save_best_only=True)
-reducelr = ReduceLROnPlateau(monitor="val_accuracy", verbose=1, patience=2, factor=0.1, min_lr=1e-7)
+reducelr = ReduceLROnPlateau(monitor="val_accuracy", verbose=1, patience=2, factor=0.9, min_lr=1e-7)
 
 # put callbacks to use in the cb array
-cb = [mc]
-batch_size = 32
+cb = [mc,reducelr,es]
 
-train_dir = "C:/Users/raouf/Desktop/pfe/dataset/train"
-validation_dir = "C:/Users/raouf/Desktop/pfe/dataset/val"
+
+
 
 # Set up data generators
-train_datagen = tf.keras.preprocessing.image.ImageDataGenerator(rescale=1./255 #, rotation_range=40,width_shift_range=0.2,height_shift_range=0.2,shear_range=0.2,zoom_range=0.2,horizontal_flip=True
+train_datagen = tf.keras.preprocessing.image.ImageDataGenerator(rescale=1./255 , rotation_range=40,width_shift_range=0.2,height_shift_range=0.2,shear_range=0.2,zoom_range=0.2,horizontal_flip=True
 )
 train_generator = train_datagen.flow_from_directory(train_dir,target_size=(224, 224),batch_size=batch_size,class_mode='categorical')
+
+
 test_datagen = tf.keras.preprocessing.image.ImageDataGenerator(rescale=1./255)
-validation_generator = test_datagen.flow_from_directory(validation_dir,target_size=(224, 224),batch_size=batch_size,class_mode='categorical')
+test_generator = test_datagen.flow_from_directory(test_dir, target_size=(224, 224), batch_size=batch_size, class_mode='categorical')
+
+validation_datagen = tf.keras.preprocessing.image.ImageDataGenerator(rescale=1./255)
+validation_generator = validation_datagen.flow_from_directory(validation_dir, target_size=(224, 224), batch_size=batch_size, class_mode='categorical')
 
 
 
@@ -199,7 +211,7 @@ validation_generator = test_datagen.flow_from_directory(validation_dir,target_si
 
 import time
 
-architecture="efficientnet"
+architecture="resnet"
 
 
 start_time = time.time()
@@ -217,6 +229,7 @@ print("Execution time:", duration, "seconds")
 
 
 # Save the DataFrame to an Excel file
-history_excel_path = 'C:/Users/raouf/Desktop/pfe/history/to compare effnet soft/' +architecture+ '_history_'+ str(duration)+  '.xlsx'
+
+history_excel_path = saveHistoryDirectory +architecture+ '_history_'+ str(duration)+  '.xlsx'
 history_df.to_excel(history_excel_path, index=False)
 print("Training history saved to:", history_excel_path)
