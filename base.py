@@ -178,14 +178,14 @@ def build_model(arch):
     conv = (Dense(2, activation="softmax")(conv))
     model = Model(inputs=from_scratch.inputs, outputs=conv)
     # model.summary()
-    model.compile(optimizer=tf.keras.optimizers.Adam(lr=0.005), loss=loss_function, metrics=["accuracy"])
+    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001), loss=loss_function, metrics=["accuracy"])
     return model
 
 
 # adding some callbacks : early stopping, modelCheckpoint, and reduce learning rate on plateau
 es = EarlyStopping(monitor="val_accuracy", verbose=1, min_delta=0.01, patience=6)
 mc = ModelCheckpoint(monitor="val_accuracy", verbose=1, filepath="./bestmodel.h5", save_best_only=True)
-reducelr = ReduceLROnPlateau(monitor="val_accuracy", verbose=1, patience=2, factor=0.9, min_lr=1e-7)
+reducelr = ReduceLROnPlateau(monitor="val_accuracy", verbose=1, patience=1, factor=0.9, min_lr=1e-7)
 
 # put callbacks to use in the cb array
 cb = [mc,reducelr,es]
@@ -211,7 +211,7 @@ validation_generator = validation_datagen.flow_from_directory(validation_dir, ta
 
 import time
 
-architecture="resnet"
+architecture="vgg16"
 
 
 start_time = time.time()
