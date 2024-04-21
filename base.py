@@ -1,6 +1,6 @@
 from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 from tensorflow.keras import layers, models
-from keras.layers import concatenate, Dense, Conv2D, MaxPooling2D, Flatten, Activation, BatchNormalization, Dropout
+from keras.layers import concatenate, Dense, Conv2D, MaxPooling2D, Flatten, Activation, BatchNormalization, Dropout, Attention
 from keras import *
 from keras.applications import MobileNet
 from keras.applications import VGG16
@@ -16,17 +16,20 @@ import keras.applications
 image_dir = "C:/Users/raouf/Desktop/pfe/dataset"
 train_dir = "C:/Users/raouf/Desktop/pfe/dataset/train"
 validation_dir = "C:/Users/raouf/Desktop/pfe/dataset/val"
-saveHistoryDirectory='C:/Users/raouf/Desktop/pfe/history/resnet/'
+test_dir = "C:/Users/raouf/Desktop/pfe/my_dataset/test"
+saveHistoryDirectory='C:/Users/raouf/Desktop/pfe/history/latest/'
 
 #comment this if you are professor
 from myDirectory import *
 
 
-num_epochs = 10
+num_epochs = 3
 mode = "binary"
 loss_function = "binary_crossentropy"
 num_classes = 2
 batch_size = 96
+learning_rate = 0.001
+soft_attention_enabled = False
 
 
 class SoftAttention(Layer):
@@ -119,7 +122,7 @@ class SoftAttention(Layer):
 
 
 
-def choose_conv_base(name="from_scratch", input_shape=(224, 224, 3)):
+def choose_conv_base(name="vgg16", input_shape=(224, 224, 3)):
     if (name == "from_scratch"):
         conv_base = models.Sequential()
         conv_base.add(layers.Conv2D(32, (3, 3), activation='relu', input_shape=input_shape))
@@ -151,21 +154,13 @@ def choose_conv_base(name="from_scratch", input_shape=(224, 224, 3)):
 def build_model(arch):
     from_scratch = choose_conv_base(arch)
     conv = from_scratch.layers[-1].output
-
-    #attention
     #attention_layer, map2 = SoftAttention(aggregate=True, m=16, concat_with_x=False, ch=int(conv.shape[-1]),name='soft_attention')(conv)
     #attention_layer = (MaxPooling2D(pool_size=(2, 2), padding="same")(attention_layer))
-
-
-
+    conv = Activation("relu")(conv)
     conv = (MaxPooling2D(pool_size=(2, 2), padding="same")(conv))
-
-
-    #attention
     #param=[conv, attention_layer]
     param = [conv]
-
-    conv = concatenate(param)
+    #conv = concatenate(param)
     conv = Activation("relu")(conv)
     conv = Dropout(0.2)(conv)
     conv = (Conv2D(filters=512, kernel_size=(3, 3), activation="relu", padding="same", kernel_initializer='he_normal')(conv))
@@ -196,7 +191,11 @@ cb = [mc,reducelr,es]
 # Set up data generators
 train_datagen = tf.keras.preprocessing.image.ImageDataGenerator(rescale=1./255 , rotation_range=40,width_shift_range=0.2,height_shift_range=0.2,shear_range=0.2,zoom_range=0.2,horizontal_flip=True
 )
-train_generator = train_datagen.flow_from_directory(train_dir,target_size=(224, 224),batch_size=batch_size,class_mode='categorical')
+train_generator = train_datagen.flow_from_directory(
+    train_dir,
+    target_size=(224, 224),
+    batch_size=batch_size,
+    class_mode='categorical')
 
 
 test_datagen = tf.keras.preprocessing.image.ImageDataGenerator(rescale=1./255)
@@ -212,16 +211,22 @@ validation_generator = validation_datagen.flow_from_directory(validation_dir, ta
 import time
 
 architecture="vgg16"
-
+channels = 64  # Define the number of channels
+multiheads = 8
 
 start_time = time.time()
 
 
+
 # Compile and train the model
 model = build_model(architecture)
-history = model.fit_generator(train_generator, steps_per_epoch=train_generator.samples // batch_size,
-                              epochs=num_epochs, validation_data=validation_generator,
-                              validation_steps=validation_generator.samples // batch_size, callbacks=cb)
+
+history = model.fit_generator(train_generator,
+                              steps_per_epoch=train_generator.samples // batch_size,
+                              epochs=num_epochs,
+                              validation_data=validation_generator,
+                              validation_steps=validation_generator.samples // batch_size,
+                              callbacks=cb)
 history_df = pd.DataFrame(history.history)
 end_time = time.time()
 duration = round(end_time - start_time)
